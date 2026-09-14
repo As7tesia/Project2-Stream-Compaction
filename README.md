@@ -12,3 +12,9 @@ CUDA Stream Compaction
 Include analysis, etc. (Remember, this is public, so don't put
 anything here that you don't want to share with the world.)
 
+
+### Build notes
+
+added `/Zc:preprocessor` to CMakeLists for MSVC builds
+(and `-Xcompiler=/Zc:preprocessor` for the CUDA side). CUDA 13.3's Thrust/CCCL headers refuse to compile under
+MSVC's traditional preprocessor and fail with a fatal `C1189` in `thrust.cu` without it.

@@ -23,6 +23,14 @@ if(UNIX)
     include_directories("${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES}")
 endif(UNIX)
 
+# CUDA 13's CCCL headers (Thrust/CUB) refuse to build with MSVC's traditional
+# preprocessor; they require the standards-conforming one.
+if(MSVC)
+    add_compile_options(
+        "$<$<COMPILE_LANGUAGE:CXX>:/Zc:preprocessor>"
+        "$<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/Zc:preprocessor>")
+endif()
+
 add_subdirectory(stream_compaction)
 
 include_directories(.)

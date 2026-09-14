@@ -20,6 +20,10 @@ namespace StreamCompaction {
         void scan(int n, int *odata, const int *idata) {
             timer().startCpuTimer();
             // TODO
+            odata[0] = 0;
+            for (int i = 1; i < n; ++i) {
+                odata[i] = idata[i-1] + odata[i-1];
+            }
             timer().endCpuTimer();
         }
 
@@ -29,10 +33,26 @@ namespace StreamCompaction {
          * @returns the number of elements remaining after compaction.
          */
         int compactWithoutScan(int n, int *odata, const int *idata) {
+            int counter = 0;
             timer().startCpuTimer();
             // TODO
+            for (int k = 0; k < n; ++k) {
+                if (idata[k] != 0) {
+                    odata[counter] = idata[k];
+                    ++counter;
+                }
+            }
             timer().endCpuTimer();
-            return -1;
+            return counter;
+        }
+
+        // CPU scatter
+        void scatter(int n, int *odata, const int *idata, int *flag, int *idx) {
+            for (int k = 0; k < n; ++k) {
+                if (flag[k] != 0) {
+                    odata[idx[k]] = idata[k];
+                }
+            }
         }
 
         /**
@@ -41,10 +61,29 @@ namespace StreamCompaction {
          * @returns the number of elements remaining after compaction.
          */
         int compactWithScan(int n, int *odata, const int *idata) {
+            int *flag = new int[n];
+            int *scan_result = new int[n];
             timer().startCpuTimer();
-            // TODO
+
+            // step 1 calculate temp array of flags
+            for (int i = 0; i < n; ++i) {
+                flag[i] = idata[i] != 0;
+            }
+
+            // step 2 scan the temp flag array
+            scan_result[0] = 0;
+            for (int i = 1; i < n; ++i) {
+                scan_result[i] = flag[i-1] + scan_result[i-1];
+            }
+
+            // step 3 scatter final array
+            scatter(n, odata, idata, flag, scan_result);
+
             timer().endCpuTimer();
-            return -1;
+            int elements_remain = scan_result[n - 1] + flag[n - 1];
+            delete[] flag;
+            delete[] scan_result;
+            return elements_remain;
         }
     }
 }

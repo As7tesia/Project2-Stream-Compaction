@@ -3,6 +3,7 @@ set(headers
     "cpu.h"
     "naive.h"
     "efficient.h"
+    "efficient_slow.h"
     "thrust.h"
     )
 
@@ -11,6 +12,7 @@ set(sources
     "cpu.cu"
     "naive.cu"
     "efficient.cu"
+    "efficient_slow.cu"
     "thrust.cu"
     )
 

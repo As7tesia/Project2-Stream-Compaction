@@ -1,10 +1,10 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include "common.h"
-#include "efficient.h"
+#include "efficient_slow.h"
 
 namespace StreamCompaction {
-    namespace Efficient {
+    namespace EfficientSlow {
         using StreamCompaction::Common::PerformanceTimer;
         PerformanceTimer& timer()
         {
@@ -12,7 +12,7 @@ namespace StreamCompaction {
             return timer;
         }
 
-        static int blockSize = 512;   // fastest at n = 2^24 in profiling/summary.md
+        static int blockSize = 512;   // fastest at n = 2^24 in profiling/summary.md (pre-Part-5 sweep)
 
         void setBlockSize(int newBlockSize) {
             if (newBlockSize < 1 || newBlockSize > 1024) {
@@ -26,19 +26,21 @@ namespace StreamCompaction {
         }
 __global__ void kernScanUp(int n, int* data, int d)
 {
-    int index = threadIdx.x + blockDim.x * blockIdx.x;   // thread number, 0 .. n/2^(d+1) - 1
-    if (index >= (n >> (d+1))) return;
-    int pos = index << (d+1);                            // k-th multiple of 2^(d+1) = old data index
-    data[pos + (1 << (d+1)) - 1] += data[pos + (1 << d) - 1];
+    int index = threadIdx.x + blockDim.x * blockIdx.x;
+    if (index >= n) return;
+    if (!(index & (1 << (d+1)) - 1)) {     // = index mod (2^[d+1])
+        data[index + (1 << (d+1)) - 1] += data[index + (1 << (d)) - 1];
+    }
 }
 
 __global__ void kernScanDown(int n, int* data, int d) {
     int index = threadIdx.x + blockDim.x * blockIdx.x;
-    if (index >= (n >> (d+1))) return;
-    int pos = index << (d+1);
-    int t = data[pos + (1 << d) - 1];
-    data[pos + (1 << d) - 1] = data[pos + (1 << (d+1)) - 1];
-    data[pos + (1 << (d+1)) - 1] += t;
+    if (index >= n) return;
+    if (!(index & (1 << (d+1)) - 1)) {     // = index mod (2^[d+1])
+        int t = data[index + (1 << (d)) - 1];
+        data[index + (1 << (d)) - 1] = data[index + (1 << (d+1)) - 1];
+        data[index + (1 << (d+1)) - 1] += t;
+    }
 }
         /**
          * Exclusive scan of a device buffer, in place. No timer, no allocation.
@@ -46,23 +48,21 @@ __global__ void kernScanDown(int n, int* data, int d) {
          */
         void scanDevice(int paddedN, int logn, int *d_data) {
             int gridSize;
-            
             // Up sweep
             for (int d = 0; d <= logn - 1; ++d) {
-                gridSize = ((paddedN >> (d+1)) + (blockSize - 1)) / blockSize;
+                gridSize = (paddedN + (blockSize - 1)) / blockSize;
                 kernScanUp<<<gridSize, blockSize>>>(paddedN, d_data, d);
-                checkCUDAError("kernScanUp failed");
+                checkCUDAError("kernScanUp failed");    
             }
             // x[n-1] = 0
             cudaMemset(d_data + paddedN - 1, 0, sizeof(int));
             checkCUDAError("cudaMemset root failed");
             // Down sweep
             for (int d = logn - 1; d >= 0; --d) {
-                gridSize = ((paddedN >> (d+1)) + (blockSize - 1)) / blockSize;
                 kernScanDown<<<gridSize, blockSize>>>(paddedN, d_data, d);
                 checkCUDAError("kernScanDown failed");
             }
-        }   
+        }
 
         /**
          * Performs prefix-sum (aka scan) on idata, storing the result into odata.

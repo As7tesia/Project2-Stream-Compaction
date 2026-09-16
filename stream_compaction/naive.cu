@@ -3,8 +3,6 @@
 #include "common.h"
 #include "naive.h"
 
-const int blockSize = 128;
-
 namespace StreamCompaction {
     namespace Naive {
         using StreamCompaction::Common::PerformanceTimer;
@@ -12,6 +10,19 @@ namespace StreamCompaction {
         {
             static PerformanceTimer timer;
             return timer;
+        }
+
+        static int blockSize = 512;   // fastest at n = 2^24 in profiling/summary.md
+
+        void setBlockSize(int newBlockSize) {
+            if (newBlockSize < 1 || newBlockSize > 1024) {
+                throw std::invalid_argument("block size must be in 1..1024");
+            }
+            blockSize = newBlockSize;
+        }
+
+        int getBlockSize() {
+            return blockSize;
         }
         // TODO: __global__
         __global__ void kernScan(int n, int *d_data_r, int *d_data_w, int d) {

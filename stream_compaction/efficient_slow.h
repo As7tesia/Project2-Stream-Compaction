@@ -3,7 +3,10 @@
 #include "common.h"
 
 namespace StreamCompaction {
-    namespace Efficient {
+    namespace EfficientSlow {
+        // Frozen baseline for Part 5: the work-efficient scan as written from the
+        // slides, launching paddedN threads at every sweep level. Do not optimize.
+        // Efficient:: is the upgraded version; this only exists for the A/B sweep.
         StreamCompaction::Common::PerformanceTimer& timer();
 
         /**

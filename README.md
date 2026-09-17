@@ -19,7 +19,7 @@ In this project I implemented:
 All timings are medians of 5 runs from `profiling/summary.md`. GPU numbers are CUDA event time around the kernels only, `cudaMalloc`/`cudaMemcpy` are outside
 the timer. CPU numbers are `std::chrono`.
 
-With help of AI, I created a separate benchmark executable, which sweeps array size from 2^8 to 2^64, and block sizes from 32 to 1024.
+With help of AI, I created a separate benchmark executable, which sweeps array size from 2^8 to 2^26, and block sizes from 32 to 1024.
 ## Performance Data
 ### Block size
 
@@ -83,19 +83,14 @@ Compaction time (ms):
 ## Analysis
 ### Why is my work-"efficient" scan so slow???
 #### Observation
-The work-efficient scan only beats naive past 2^22 and is still ~8x behind Thrust at 2^26. The block size
-sweep is the real tell though: at 2^24 it goes 15.2 ms at block 32, 7.8 at 64, 4.6 at 128, 3.1 at 512. Naive
-over the same range is flat (4.4 -> 4.3 ms). A memory-bound kernel doesn't halve when you double the block size.
-That curve is the cost of dispatching blocks, so most of what I'm launching must not be doing anything.
+The work-efficient scan only beats naive past 2^22 and is still ~8x behind Thrust at 2^26. The block size sweep shows that there are significant runtime variations across blocksize configurations, while naive over the same range is flat.
 
 #### Reasoning
-
-
-- We can see that for unoptimized Work-efficient GPU Scan, there is a huge difference between performance with respect to block sizes. This is because it launches the kernel with same block size for each iteration, and thus creates many dead warps.
+- We can see that for unoptimized Work-efficient GPU Scan, there is a huge difference between performance with respect to block sizes. This is because it launches the same number of blocks (`paddedN / blockSize`) at every level, and thus creates many dead warps.
 - Lets take block size 512 for example. At iteration depth 0 to 4, which has stride lengths 2, 4, 8, 16, 32, every warp still has at least one active lane, but at each iteration there is only 16, 8, 4, 2, 1 of the 32 lanes active, which is huge divergence cost.
-- At iteration depth 5 above, the stride length is now wider than a warp's total number of lanes, so only one of many warps has exactly one active lane. ALl the other warps are just launching computing index and exiting because they fail the stride comparison. From this we can see why this approach is very slow.
+- At iteration depth 5 above, the stride length is now wider than a warp's total number of lanes, so only one of many warps has exactly one active lane. All the other warps are just launching, computing an index, and exiting because they fail the stride comparison. From this we can see why this approach is very slow.
 - Surprisingly (or unsurprisingly), assuming an array size of $2^{24}$, total number of working threads we need is $2^{23} + 2^{22} + ... + 1 = 2^{24} - 1$. At 32 lanes per warp that's $2^{24}$ / 32 = $2^{19}$ warps. However I launch total of 24 levels x $2^{19}$ = $24 \cdot 2^{19}$ warps, which means only __4%__ of what gets scheduled does anything, and __96%__ warps are just pure scheduling overhead (skull emoji here).
-- As visible in the graph, larger block sizes hides this performance loss more, because it dispatches less blocks that does absolutely nothing.
+- As visible in the graph, larger block sizes hide this performance loss more, because they dispatch fewer blocks that do absolutely nothing.
 - I also thought that padding to a power of two was a big issue because worst case it's almost 2x (33 -> 64), but I later realized in my sweep everything is already a power of 2 so that wasn't part of the issue at all.
 
 #### Fix
@@ -135,14 +130,14 @@ The block size curve went flat, because the old curve was really measuring how m
 *Scan time vs array size, log-log. Each implementation at its fastest block size.*
 
 
-Compacted scan beats naive from 2^19 up and CPU from 2^20 up. Still around 5x slower than Thrust at 2^26.
-Below 2^15 the two are indistinguishable, because its not launching that many blocks.
+Compacted scan beats naive from 2^21 up and CPU from 2^20 up. Still around 5x slower than Thrust at 2^26.
+Below 2^15 the two are indistinguishable, because it's not launching that many blocks.
 
-## Why is GPU slower than CPU
-We can see from the graph that even though CPU is fast than GPU for smaller array sizes, its a steady linear increase, while the GPU ones are basically flat until around 2^16 array size. This suggests that GPU approaches are dominated by the launch overheads at small array sizes.
+### Why is GPU slower than CPU at small sizes
+We can see from the graph that even though CPU is faster than GPU for smaller array sizes, it's a steady linear increase, while the GPU ones are basically flat until around 2^16 array size. This suggests that GPU approaches are dominated by the launch overheads at small array sizes.
 
 ### What Thrust is doing
-We can see that Thrust only spawns 2 kernels per run, compared to my 2 * logn number of kernel launches, so it must be using shared memory and doing the looping inside the kernel. Also its worth pointing out that in the performance data, thrust timings are including all the cuda memory allocation, copying, and freeing, and it's still faster despite all that.
+We can see that Thrust only spawns 2 kernels per run, compared to my 2 * logn number of kernel launches, so it must be doing the whole scan in a single pass with the per-block work on chip instead of going back to global memory at every level. Also it's worth pointing out that in the performance data, thrust timings include a `cudaMalloc` and `cudaFree` of its temp storage plus a sync (no copies, those are outside the call), and it's still faster despite all that.
 ![Thrust Nsight Systems Trace](img/perf/thrust_nsight_sys.png)
 
 ### Test program output
